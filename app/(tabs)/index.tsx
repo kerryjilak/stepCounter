@@ -1,128 +1,254 @@
-import React from 'react';
-import { ImageBackground, Pressable, SafeAreaView, StatusBar, StyleSheet, Text, View } from 'react-native';
+import { IconSymbol } from '@/components/ui/IconSymbol';
+import { LinearGradient } from 'expo-linear-gradient';
+import { Pedometer } from 'expo-sensors';
+import { useEffect, useState } from 'react';
+import { Alert, Dimensions, ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { ThemedText } from '../../components/ThemedText';
+import { useAuth } from '../../hooks/useAuth';
 import { COLORS } from '../constants/Colors';
+import { apiService } from '../../services/api';
 
-// A more modern, reusable button component for our design
-const ThemedButton = ({ title, onPress, color = COLORS.primary }: { title: string; onPress: () => void; color?: string }) => (
-  <Pressable
-    onPress={onPress}
-    style={({ pressed }) => [
-      styles.button,
-      { backgroundColor: color, opacity: pressed ? 0.8 : 1 },
-    ]}
-  >
-    <Text style={styles.buttonText}>{title}</Text>
-  </Pressable>
-);
+const { width } = Dimensions.get('window');
 
 export default function HomeScreen() {
-  // --- Backend Logic Placeholder ---
-  // In a real app, this state would come from a service that
-  // communicates with your hardware device.
-  const [isConnected, setIsConnected] = React.useState(true);
+  const { user } = useAuth();
+  const [currentSteps, setCurrentSteps] = useState(0);
+  const [dailyGoal, setDailyGoal] = useState(8000);
+  const [weeklyAverage, setWeeklyAverage] = useState(0);
+  const [isAvailable, setIsAvailable] = useState(false);
 
-  const handleStartSession = () => {
-    // TODO: Integrate with your session management logic.
-    console.log('Starting new session...');
-    // Example: api.startSession();
+  useEffect(() => {
+    initializePedometer();
+  }, []);
+
+  const initializePedometer = async () => {
+    const available = await Pedometer.isAvailableAsync();
+    setIsAvailable(available);
+
+    if (available) {
+      // Get today's steps
+      const end = new Date();
+      const start = new Date();
+      start.setHours(0, 0, 0, 0);
+
+      try {
+        const result = await Pedometer.getStepCountAsync(start, end);
+        setCurrentSteps(result.steps);
+
+        // Calculate weekly average
+        const weekStart = new Date();
+        weekStart.setDate(weekStart.getDate() - 7);
+        const weekResult = await Pedometer.getStepCountAsync(weekStart, end);
+        setWeeklyAverage(Math.round(weekResult.steps / 7));
+      } catch (error) {
+        console.error('Pedometer error:', error);
+      }
+    }
   };
 
-  const handleScheduleSession = () => {
-    // TODO: Navigate to a dedicated scheduling screen or show a modal.
-    // With Expo Router, you might use: router.push('/schedule');
-    console.log('Navigating to schedule session...');
+  const uploadSteps = async () => {
+    try {
+      await apiService.uploadStepData({
+        device_id: 'default-device',
+        timestamp: new Date().toISOString(),
+        step_count: currentSteps,
+      });
+      Alert.alert('Success', 'Steps uploaded successfully!');
+    } catch (error) {
+      Alert.alert('Error', 'Failed to upload steps');
+    }
   };
 
-  const handleViewPastSessions = () => {
-    // TODO: Navigate to a screen listing past sessions.
-    // With Expo Router, you might use: router.push('/sessions');
-    console.log('Navigating to past sessions...');
-  };
+  const progressPercentage = Math.min((currentSteps / dailyGoal) * 100, 100);
 
   return (
-    <ImageBackground
-      source={require('../../assets/images/closeup-sport-shoes-concrete-path.jpg')}
-      style={styles.background}
-      resizeMode="cover"
-    >
-      <SafeAreaView style={styles.container}>
-        <StatusBar barStyle="light-content" />
-        {/* Overlay to ensure text readability */}
-        <View style={styles.overlay}>
-          <View style={styles.header}>
-            <Text style={styles.title}>Home</Text>
-            <Text style={styles.connectivityStatus}>
-              Device Status:{' '}
-              <Text style={{ color: isConnected ? COLORS.success : COLORS.error }}>
-                {isConnected ? 'Connected' : 'Disconnected'}
-              </Text>
-            </Text>
-          </View>
+    <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
+      {/* Header */}
+      <View style={styles.header}>
+        <ThemedText style={styles.greeting}>
+          Good {new Date().getHours() < 12 ? 'Morning' : new Date().getHours() < 18 ? 'Afternoon' : 'Evening'}
+        </ThemedText>
+        <ThemedText style={styles.username}>{user?.first_name || user?.username || 'User'}</ThemedText>
+      </View>
 
-          <View style={styles.content}>
-            <ThemedButton
-              title="Start New Session"
-              onPress={handleStartSession}
-            />
-            <ThemedButton
-              title="Schedule a Session"
-              onPress={handleScheduleSession}
-              color={COLORS.secondary}
-            />
-            <ThemedButton
-              title="View Past Sessions"
-              onPress={handleViewPastSessions}
-              color={COLORS.gray}
-            />
-          </View>
+      {/* Main Step Counter Card */}
+      <LinearGradient
+        colors={[COLORS.gradientStart, COLORS.gradientEnd]}
+        style={styles.mainCard}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+      >
+        <View style={styles.stepCountContainer}>
+          <ThemedText style={styles.stepCount}>{currentSteps.toLocaleString()}</ThemedText>
+          <ThemedText style={styles.stepLabel}>Steps Today</ThemedText>
         </View>
-      </SafeAreaView>
-    </ImageBackground>
+        
+        {/* Progress Ring */}
+        <View style={styles.progressContainer}>
+          <View style={styles.progressRing}>
+            <View style={[styles.progressFill, { width: `${progressPercentage}%` }]} />
+          </View>
+          <ThemedText style={styles.progressText}>
+            {Math.round(progressPercentage)}% of goal
+          </ThemedText>
+        </View>
+      </LinearGradient>
+
+      {/* Stats Cards */}
+      <View style={styles.statsContainer}>
+        <View style={styles.statCard}>
+          <IconSymbol name="target" size={24} color={COLORS.primary} />
+          <ThemedText style={styles.statValue}>{dailyGoal.toLocaleString()}</ThemedText>
+          <ThemedText style={styles.statLabel}>Daily Goal</ThemedText>
+        </View>
+        
+        <View style={styles.statCard}>
+          <IconSymbol name="chart.bar" size={24} color={COLORS.secondary} />
+          <ThemedText style={styles.statValue}>{weeklyAverage.toLocaleString()}</ThemedText>
+          <ThemedText style={styles.statLabel}>Weekly Avg</ThemedText>
+        </View>
+      </View>
+
+      {/* Action Button */}
+      <TouchableOpacity style={styles.uploadButton} onPress={uploadSteps}>
+        <IconSymbol name="icloud.and.arrow.up" size={20} color={COLORS.white} />
+        <ThemedText style={styles.uploadButtonText}>Sync Steps</ThemedText>
+      </TouchableOpacity>
+
+      {/* Status */}
+      {!isAvailable && (
+        <View style={styles.statusCard}>
+          <IconSymbol name="exclamationmark.triangle" size={20} color={COLORS.warning} />
+          <ThemedText style={styles.statusText}>Pedometer not available on this device</ThemedText>
+        </View>
+      )}
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  background: {
-    flex: 1,
-  },
   container: {
     flex: 1,
-    backgroundColor: 'transparent', // Make container transparent to see the background
-  },
-  overlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.3)', // Dark overlay for text contrast
+    backgroundColor: COLORS.lightGray,
   },
   header: {
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-    backgroundColor: 'transparent', // Header is part of the overlay
+    paddingHorizontal: 24,
+    paddingTop: 60,
+    paddingBottom: 20,
   },
-  title: {
-    fontSize: 32,
-    fontWeight: 'bold',
-    color: COLORS.white, // Change text to white for visibility on dark overlay
-  },
-  connectivityStatus: {
+  greeting: {
     fontSize: 16,
-    color: COLORS.lightGray, // Lighter gray for better contrast
-    marginTop: 8,
+    color: COLORS.gray,
+    fontWeight: '500',
   },
-  content: {
-    flex: 1,
-    justifyContent: 'center',
-    paddingHorizontal: 20,
-    gap: 16, // Use gap for modern spacing
+  username: {
+    fontSize: 28,
+    fontWeight: 'bold',
+    color: COLORS.black,
+    marginTop: 4,
   },
-  button: {
-    paddingVertical: 14,
-    paddingHorizontal: 20,
-    borderRadius: 10,
+  mainCard: {
+    marginHorizontal: 24,
+    marginBottom: 24,
+    borderRadius: 20,
+    padding: 32,
     alignItems: 'center',
   },
-  buttonText: {
+  stepCountContainer: {
+    alignItems: 'center',
+    marginBottom: 24,
+  },
+  stepCount: {
+    fontSize: 48,
+    fontWeight: 'bold',
+    color: COLORS.white,
+  },
+  stepLabel: {
+    fontSize: 16,
+    color: COLORS.white,
+    opacity: 0.9,
+    marginTop: 4,
+  },
+  progressContainer: {
+    width: '100%',
+    alignItems: 'center',
+  },
+  progressRing: {
+    width: '100%',
+    height: 8,
+    backgroundColor: 'rgba(255,255,255,0.3)',
+    borderRadius: 4,
+    overflow: 'hidden',
+    marginBottom: 8,
+  },
+  progressFill: {
+    height: '100%',
+    backgroundColor: COLORS.white,
+    borderRadius: 4,
+  },
+  progressText: {
+    fontSize: 14,
+    color: COLORS.white,
+    opacity: 0.9,
+  },
+  statsContainer: {
+    flexDirection: 'row',
+    paddingHorizontal: 24,
+    marginBottom: 24,
+    gap: 16,
+  },
+  statCard: {
+    flex: 1,
+    backgroundColor: COLORS.white,
+    borderRadius: 16,
+    padding: 20,
+    alignItems: 'center',
+    shadowColor: COLORS.black,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 3,
+  },
+  statValue: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: COLORS.black,
+    marginTop: 8,
+  },
+  statLabel: {
+    fontSize: 12,
+    color: COLORS.gray,
+    marginTop: 4,
+  },
+  uploadButton: {
+    marginHorizontal: 24,
+    backgroundColor: COLORS.primary,
+    borderRadius: 16,
+    padding: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 24,
+  },
+  uploadButtonText: {
     color: COLORS.white,
     fontSize: 16,
     fontWeight: '600',
+    marginLeft: 8,
+  },
+  statusCard: {
+    marginHorizontal: 24,
+    backgroundColor: COLORS.warning + '20',
+    borderRadius: 12,
+    padding: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 24,
+  },
+  statusText: {
+    color: COLORS.warning,
+    fontSize: 14,
+    marginLeft: 8,
+    flex: 1,
   },
 });
